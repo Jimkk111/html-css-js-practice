@@ -19,6 +19,7 @@
             left: 0px;
             background-color: #887a7a;
         }
+
         .father-a {
             width: 200px;
             height: 200px;
@@ -28,23 +29,109 @@
             background-color:aqua
         }
         .father-a .son-a{
-            width: 200px;
+            width: 100%;
             height: 200px;
             position: absolute;
             left: 0px;
             background-color: #887a7a;
         }
-    </style>
+
+        .father-f {
+            width: 200px;
+            height: 200px;
+            padding: 10px;
+            margin: 10px;
+            position: relative;
+            background-color:aqua
+        }
+        .father-f .son-f{
+            width: 100%;
+            height: 200px;
+            position: fixed;
+            left: 0px;
+            /* top:0px; */
+            background-color: #887a7a;
+        }
+
+        .father-s {
+            width: 200px;
+            height: 200px;
+            padding: 10px;
+            margin: 10px;
+            /* position: relative; */
+            background-color:aqua;
+            overflow:scroll;
+        }
+        .father-s .son-s{
+            width: 100%;
+            height: 20px;
+            position: sticky;
+            top:-10px;
+            background-color: #887a7a;
+        }
+
+        .father-s .li{
+            width: 200px;
+            height: 50px;
+            background-color: #a82525;
+        }
+        </style>
 </head>
 <body>
-    <!-- relative positioning -->
+<!-- 包含块(containing block):元素布局计算的参考矩形,影响两类计算:
+        1. 定位偏移:absolute/fixed元素的top/right/bottom/left相对它计算(relative相对自身原位置,sticky相对最近滚动容器,fixed相对视口)
+        2. 百分比尺寸:width/height/padding/margin的%相对它计算(margin/padding的%不论上下左右都取包含块的宽度) -->
+<!-- relative positioning -->
+
+     <!-- relative元素的偏移原点基于自身原来位置 -->
+      <!-- relative元素的包含块是最近块级祖先元素的content box -->
      <div class="father-r">
         <div class="son-r"></div>
      </div>
+
      <!-- absolute positioning -->
+    <!-- absolute元素的偏移原点基于最近非static祖先元素的padding box -->
+    <!-- absolute元素的包含块是最近非static祖先元素的padding box -->
      <div class="father-a">
         <div class="son-a"></div>
      </div>
-     
+     <!-- fixed positioning -->
+    <!-- fixed元素的偏移原点基于视口(初始包含块) -->
+    <!-- fixed元素的包含块是视口;例外:祖先有transform/filter等属性时,是该祖先的padding box -->
+    <!-- top初始值是auto,auto时取"静态位置":假设它是static、float:none时,在正常流中本该出现的位置(量到margin边缘);
+         该位置由前面的兄弟元素排布决定,且相对视口冻结,所以fixed通常显式设置top -->
+     <div class="father-f">
+         <div class="son-f"></div>
+    </div>
+        
+    <!-- sticky positioning -->
+     <!-- sticky元素的黏贴点设置相对于最近的可滚动祖先元素 -->
+      <!-- sticky元素的包含块是最近的块级祖先元素的content box -->
+     <div class="father-s">
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="son-s"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+        <div class="li"></div>
+     </div>
+
 </body>
 </html>
