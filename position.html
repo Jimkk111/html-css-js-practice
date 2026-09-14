@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>position</title>
+
+    <style>
+        .father-r {
+            width: 200px;
+            height: 200px;
+            padding: 10px;
+            background-color:aqua
+        }
+        .father-r .son-r{
+            width: 200px;
+            height: 200px;
+            position: relative;
+            left: 0px;
+            background-color: #887a7a;
+        }
+        .father-a {
+            width: 200px;
+            height: 200px;
+            padding: 10px;
+            margin: 10px;
+            position: relative;
+            background-color:aqua
+        }
+        .father-a .son-a{
+            width: 200px;
+            height: 200px;
+            position: absolute;
+            left: 0px;
+            background-color: #887a7a;
+        }
+    </style>
+</head>
+<body>
+    <!-- relative positioning -->
+     <div class="father-r">
+        <div class="son-r"></div>
+     </div>
+     <!-- absolute positioning -->
+     <div class="father-a">
+        <div class="son-a"></div>
+     </div>
+     
+</body>
+</html>
