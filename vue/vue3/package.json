@@ -1,0 +1,14 @@
+{
+  "name": "vue3-mini",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "跟着《Vue.js 设计与实现》实现的最小可用 Vue 3：编译器 + 渲染器 + 响应式 + 组件系统。纯 ESM、零依赖，浏览器里直接跑。",
+  "scripts": {
+    "test": "node --test tests/",
+    "dev": "node server.mjs",
+    "smoke": "node tests/smoke.mjs"
+  },
+  "keywords": ["vue", "vue3", "reactivity", "compiler", "virtual-dom", "renderer"],
+  "license": "MIT"
+}

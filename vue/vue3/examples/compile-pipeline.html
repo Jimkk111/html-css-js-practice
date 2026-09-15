@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>① 模板是怎么被编译的 —— 编译流水线可视化</title>
+  <link rel="stylesheet" href="./shared.css">
+</head>
+<body>
+  <header class="site">
+    <a class="logo" href="./index.html">vue-mini</a>
+    <nav>
+      <a href="./index.html">总览</a>
+      <a href="./compile-pipeline.html" class="active">① 编译流水线</a>
+      <a href="./renderer.html">② 渲染器与 Diff</a>
+      <a href="./reactivity.html">③ 响应式系统</a>
+      <a href="./components.html">④ 组件化原理</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <h1>模板是怎么被编译成渲染函数的？</h1>
+    <p class="lead">
+      在下面写一段模板（左边有可点按的例子），右边会实时展示编译器四个阶段的产物。
+      核心结论：<b>模板只是"给人看的写法"，编译之后它就变成一个普通 JS 函数</b>，
+      函数执行时返回一棵虚拟 DOM 树 —— 之后的事都交给渲染器（下一个页面）。
+    </p>
+
+    <div class="card">
+      <h2>试一试</h2>
+      <div id="samples">
+        <button class="ghost" data-tpl='<div id="app"><p class="title">静态标题</p><span>{{ msg }}</span></div>'>插值 + 静态提升</button>
+        <button class="ghost" data-tpl='<button @click="count++">点了 {{ count }} 次</button>'>事件 + 文本合并</button>
+        <button class="ghost" data-tpl='<ul><li v-for="(item, i) in list" :key="item.id">{{ item.name }}</li></ul>'>v-for + key</button>
+        <button class="ghost" data-tpl='<b v-if="ok">开了</b><i v-else>关了</i>'>v-if / v-else</button>
+        <button class="ghost" data-tpl='<input v-model="msg" placeholder="双向绑定">'>v-model</button>
+        <button class="ghost" data-tpl='<div :class="cls" :style="sty">样式绑定</div>'>class / style</button>
+        <button class="ghost" data-tpl='<MyComp :msg="m"><slot/></MyComp>'>组件与插槽</button>
+      </div>
+      <textarea id="tpl" spellcheck="false"><div id="app">
+  <p class="title">静态标题</p>
+  <span>{{ msg }}</span>
+</div></textarea>
+    </div>
+
+    <div class="cols two">
+      <div class="card">
+        <h2><span class="badge">阶段 1</span> 词法分析 tokenize —— 字符流 → token 流</h2>
+        <p class="muted">有限状态机逐字符扫描。同一字符在不同语境下含义不同（&gt; 在文本里是普通字符，在标签里是结束），所以必须靠"状态"决定怎么处理。</p>
+        <table class="tokens" id="tokens"><thead><tr><th>#</th><th>type</th><th>内容</th></tr></thead><tbody></tbody></table>
+      </div>
+
+      <div class="card">
+        <h2><span class="badge">阶段 2</span> 语法分析 parse —— token 流 → AST</h2>
+        <p class="muted">用栈恢复嵌套关系；属性被分成静态 ATTRIBUTE（编译期定死）与指令 DIRECTIVE（运行时求值）。这个区分是所有优化的地基。</p>
+        <ul class="tree" id="ast"></ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="badge">阶段 3+4</span> transform 优化 + generate 生成 —— AST → render 函数源码</h2>
+      <p class="muted">
+        transform 做了三件大事：<b>①语义转换</b>（v-if→三元、v-for→renderList、@click→onClick）；
+        <b>②优化标注</b>（patchFlag 告诉运行时"哪里会变"、静态子树提升到函数外只创建一次、开块收集动态后代）；
+        <b>③标识符改写</b>（msg → _ctx.msg）。
+        下面产物里 <span class="tag-flag">数字标注</span> 就是 patchFlag，<span class="tag-hoist">_hoisted_N</span> 就是静态提升。
+      </p>
+      <pre class="code" id="code"></pre>
+      <p class="muted" id="meta"></p>
+    </div>
+
+    <div class="card">
+      <h2><span class="badge">运行</span> 执行编译产物 → 得到 VNode</h2>
+      <p class="muted">下面的按钮会用真实的状态执行左边的 render 函数，产出的 vnode 就是渲染器的输入。</p>
+      <button id="run">执行 render(_ctx)</button>
+      <pre class="code" id="vnode">（点击按钮执行）</pre>
+    </div>
+
+    <div class="card">
+      <h2>三个值得盯着看的细节</h2>
+      <ul>
+        <li><b>静态提升</b>：没有动态绑定的子树被提到 render 函数外面，成为模块级常量，
+          更新时连比较都不需要（去试试第一个例子，注意 <code class="inline">_hoisted_1</code> 和 patchFlag <code class="inline">-1</code>）。</li>
+        <li><b>文本合并</b>：<code class="inline">{{ a }} - {{ b }}</code> 会被合并成一个表达式，
+          打上 TEXT 标记 —— 更新时一次 setText 完成，不用 diff。</li>
+        <li><b>key 的去向</b>：v-for 里 :key 出现在 props 里，但不在 dynamicProps 清单里 ——
+          因为 key 一变节点就会被重建，根本轮不到"属性更新"这一步。</li>
+      </ul>
+    </div>
+  </main>
+
+  <script type="module">
+    import { compileWithSteps, compile } from '../src/compiler-core/index.js'
+    import { RUNTIME_HELPERS } from '../src/runtime-core/runtimeHelpers.js'
+    import { NodeTypes } from '../src/compiler-core/ast.js'
+
+    const $tpl = document.getElementById('tpl')
+    const $tokens = document.querySelector('#tokens tbody')
+    const $ast = document.getElementById('ast')
+    const $code = document.getElementById('code')
+    const $meta = document.getElementById('meta')
+    const $vnode = document.getElementById('vnode')
+
+    const escape = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    function renderTokens(tokens) {
+      $tokens.innerHTML = tokens.map((t, i) => `<tr>
+        <td>${i}</td>
+        <td class="t">${escape(t.type)}</td>
+        <td class="v">${escape(JSON.stringify(t.value ?? t.name))}${t.attrs ? escape(' attrs: ' + JSON.stringify(t.attrs.map(a => a.name + (a.hasValue ? '=' + a.value : '')))) : ''}</td>
+      </tr>`).join('')
+    }
+
+    /** 递归把 AST 画成树 */
+    function renderAst(node) {
+      const li = document.createElement('li')
+      li.className = node.children && node.children.length ? 'branch' : ''
+      let label = ''
+      switch (node.type) {
+        case NodeTypes.ROOT: label = `<span class="tag-elem">Root</span>`; break
+        case NodeTypes.ELEMENT: {
+          const kind = node.tagType === 1 ? '组件' : node.tagType === 2 ? 'slot' : '元素'
+          label = `<span class="tag-elem">&lt;${escape(node.tag)}&gt;</span> <span class="muted">(${kind}${node.isSelfClosing ? ' 自闭合' : ''})</span>`
+          const props = (node.props || [])
+            .map(p => p.type === 'Attribute'
+              ? ` ${escape(p.name)}="…"`
+              : ` <span class="tag-expr">v-${p.name}${p.arg ? ':' + escape(p.arg.content) : ''}${p.modifiers.length ? '.' + p.modifiers.join('.') : ''}</span>`)
+            .join('')
+          label += props
+          break
+        }
+        case NodeTypes.TEXT: label = `<span class="tag-text">文本 ${escape(JSON.stringify(node.content))}</span>`; break
+        case NodeTypes.COMMENT: label = `<span class="tag-text">注释 ${escape(JSON.stringify(node.content))}</span>`; break
+        case NodeTypes.INTERPOLATION: label = `<span class="tag-expr">插值 {{ ${escape(node.content.content)} }}</span>`; break
+        case NodeTypes.IF: label = `<span class="tag-flag">v-if 分支组 × ${node.branches.length}</span>`; break
+        case NodeTypes.FOR: label = `<span class="tag-flag">v-for ${escape(node.valueAlias)} in ${escape(typeof node.source === 'string' ? node.source : node.source.content)}</span>`; break
+        default: label = escape(node.type)
+      }
+      li.innerHTML = label
+      if (node.children && node.children.length) {
+        const ul = document.createElement('ul')
+        node.children.forEach(c => ul.appendChild(renderAst(c)))
+        li.appendChild(ul)
+      }
+      if (node.type === NodeTypes.IF) {
+        const ul = document.createElement('ul')
+        node.branches.forEach((b, i) => {
+          const li2 = document.createElement('li')
+          li2.className = 'branch'
+          li2.innerHTML = `<span class="tag-flag">分支 ${i}${b.condition ? ' 条件: ' + escape(b.condition) : ' (else)'}</span>`
+          const ul2 = document.createElement('ul')
+          b.children.forEach(c => ul2.appendChild(renderAst(c)))
+          li2.appendChild(ul2)
+          ul.appendChild(li2)
+        })
+        li.appendChild(ul)
+      }
+      return li
+    }
+
+    /** 高亮渲染编译产物。
+     * ★ 必须用"一次遍历"的合并正则：如果先给 _ctx 加 span 再高亮字符串，
+     *   后面的规则会把前面插入的 HTML 属性（class="ctx" 的引号）当成代码改坏。 */
+    function renderCode(code) {
+      const html = escape(code).replace(
+        /("(?:[^"\\]|\\.)*")|(_hoisted_\d+)|(_ctx\.[\w$.]+)|(\/\*.*?\*\/)|(\b(?:const|function|return|null)\b)/g,
+        (match, str, hoist, ctx, flag, kw) => {
+          if (str) return `<span class="str">${str}</span>`
+          if (hoist || ctx) return `<span class="ctx">${hoist || ctx}</span>`
+          if (flag) return `<span class="flag">${flag}</span>`
+          return `<span class="kw">${kw}</span>`
+        }
+      )
+      $code.innerHTML = html
+    }
+
+    let current = null
+
+    function run() {
+      const tpl = $tpl.value
+      try {
+        const steps = compileWithSteps(tpl)
+        current = steps
+        renderTokens(steps.tokens)
+        $ast.innerHTML = ''
+        $ast.appendChild(renderAst(steps.ast))
+        renderCode(steps.annotatedCode)
+        $meta.innerHTML = `用到的运行时 helper：<span class="tag-expr">${steps.helpers.map(escape).join(', ') || '（无）'}</span>
+          　·　静态提升节点：<span class="tag-hoist">${steps.context.hoists.length}</span> 个`
+      } catch (e) {
+        $code.textContent = '编译失败：' + e.message
+        $meta.textContent = ''
+      }
+    }
+
+    document.getElementById('run').addEventListener('click', () => {
+      if (!current) return
+      try {
+        // 用一组"标准"状态执行：尽量把例子需要的变量都给上
+        const ctx = {
+          msg: 'Hello vue-mini',
+          count: 3,
+          ok: true,
+          cls: 'active highlighted',
+          sty: { color: 'crimson', fontSize: '20px' },
+          list: [{ id: 1, name: '苹果' }, { id: 2, name: '香蕉' }],
+          m: '组件的 props',
+        }
+        const exports = {}
+        new Function('Vue', '__exports', current.code)(RUNTIME_HELPERS, exports)
+        $vnode.textContent = stringifyVNode(exports.render(ctx, []))
+      } catch (e) {
+        $vnode.textContent = '执行失败：' + e.message
+      }
+    })
+
+    /** 把 vnode 树画成可读的缩进文本 */
+    function stringifyVNode(v, indent = 0) {
+      const pad = '  '.repeat(indent)
+      if (v == null) return pad + 'null'
+      if (typeof v === 'string') return pad + JSON.stringify(v)
+      if (Array.isArray(v)) return v.map(x => stringifyVNode(x, indent)).join('\n')
+      const type = typeof v.type === 'symbol' ? v.type.description : typeof v.type === 'object' ? `组件 ${v.type.name || '(匿名)'}` : v.type
+      let s = pad + `<${type}`
+      if (v.key != null) s += ` key=${JSON.stringify(v.key)}`
+      if (v.patchFlag) s += `  /* patchFlag: ${v.patchFlag} */`
+      if (v.dynamicChildren && v.dynamicChildren.length) s += `  /* block: ${v.dynamicChildren.length} 个动态后代 */`
+      s += '>'
+      const parts = []
+      if (v.props && Object.keys(v.props).length) {
+        parts.push(indent + 1 + 'props: ' + JSON.stringify(cleanProps(v.props)))
+      }
+      const kids = Array.isArray(v.children) ? v.children : null
+      if (kids) {
+        parts.push(kids.map(k => stringifyVNode(k, indent + 1)).join('\n'))
+      } else if (typeof v.children === 'string') {
+        parts.push(indent + 1 + JSON.stringify(v.children))
+      } else if (v.children && typeof v.children === 'object') {
+        parts.push(indent + 1 + '(插槽对象: ' + Object.keys(v.children).join(', ') + ')')
+      }
+      if (parts.length) s += '\n' + parts.join('\n') + '\n' + pad + '</' + type + '>'
+      else s += '</' + type + '>'
+      return s
+    }
+    function cleanProps(props) {
+      const out = {}
+      for (const k in props) {
+        const v = props[k]
+        out[k] = typeof v === 'function' ? (v.name ? `ƒ ${v.name}()` : 'ƒ ()') : v
+      }
+      return out
+    }
+
+    // 事件绑定
+    $tpl.addEventListener('input', run)
+    document.querySelectorAll('#samples button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        $tpl.value = btn.dataset.tpl
+        run()
+      })
+    })
+    run()
+    document.getElementById('run').click()
+  </script>
+</body>
+</html>

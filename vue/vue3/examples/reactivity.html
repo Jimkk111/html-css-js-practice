@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>③ 响应式系统 —— 数据如何驱动函数</title>
+  <link rel="stylesheet" href="./shared.css">
+</head>
+<body>
+  <header class="site">
+    <a class="logo" href="./index.html">vue-mini</a>
+    <nav>
+      <a href="./index.html">总览</a>
+      <a href="./compile-pipeline.html">① 编译流水线</a>
+      <a href="./renderer.html">② 渲染器与 Diff</a>
+      <a href="./reactivity.html" class="active">③ 响应式系统</a>
+      <a href="./components.html">④ 组件化原理</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <h1>响应式系统：数据变化时，为什么函数会自动重新执行？</h1>
+    <p class="lead">
+      答案只有一句话：<b>读取时记录"谁读了我"（track），写入时通知"读过的人"重新执行（trigger）。</b>
+      Proxy 是拦截读写的手段，effect 是"被通知的人"。下面把这条链路完全摊开给你看。
+    </p>
+
+    <div class="cols two">
+      <div class="card">
+        <h2>实验一：批量更新（调度器）</h2>
+        <p class="muted">组件的渲染函数是一个 effect，但它<b>不直接重跑</b>——
+          数据变化只把它放进队列，本微任务结束时统一执行一次。试着连点三下：</p>
+        <button id="btn-batch">count 加 1</button>
+        <button id="btn-batch3">一次加 3（连改三次状态）</button>
+        <div class="demo-stage" style="margin-top:10px;">
+          <p style="margin:0; font-size:20px;">count = <b id="batch-val">0</b></p>
+          <p class="muted" style="margin:4px 0 0;">渲染次数：<b id="batch-render">0</b></p>
+        </div>
+        <p class="muted">「一次加 3」点了之后渲染次数只 +1 —— 这就是 Vue "异步批量更新"的直观收益。</p>
+      </div>
+
+      <div class="card">
+        <h2>实验二：computed 的缓存与惰性</h2>
+        <p class="muted">computed 也是 effect，但它被通知时<b>只把缓存标记为过期（dirty）</b>，
+          等真的有人来读 <code class="inline">.value</code> 才重算。</p>
+        <label>数组求和：<input type="text" id="nums" value="1, 2, 3, 4" style="width:180px; display:inline-block;"></label>
+        <button id="btn-read">读取一次 sum.value</button>
+        <div class="demo-stage" style="margin-top:10px;">
+          <p style="margin:0; font-size:20px;">sum = <b id="sum-val">10</b></p>
+          <p class="muted" style="margin:4px 0 0;">getter 实际执行次数：<b id="sum-count">0</b></p>
+        </div>
+        <p class="muted">改数字后<b>先别点按钮</b>——你会发现执行次数不变（惰性）；点了才 +1（读到才重算）。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>trigger 日志：看一眼"账本"怎么流动</h2>
+      <div class="log" id="dep-log" style="max-height:220px;"><div class="op-info">（操作上面的控件，这里会打印 track/trigger 的细节）</div></div>
+    </div>
+
+    <div class="card">
+      <h2>原理一页纸</h2>
+      <pre class="code">
+const state = reactive({ count: 0 })
+
+effect(() => render(state.count))     // ← 组件的渲染函数就是这么"活"起来的
+//   └─ 执行时读到 state.count → Proxy get 拦截 → track(state, "count")
+//      账本记下：targetMap[ state ]["count"] → [渲染effect]
+
+state.count++                          // ← 写入
+//   └─ Proxy set 拦截 → trigger(state, "count")
+//      翻账本找到依赖它的 effect → 有 scheduler 就交给调度器（排队，微任务里批量执行）
+//      没有就立刻 effect.run() 重新执行
+
+ref 呢？  原始值没法被 Proxy 拦截，于是包一层对象 { value: 0 }，
+         读写 .value 同样走 get/set → 复用同一套 track/trigger。
+
+computed 呢？ 一个带 scheduler 的 effect + dirty 缓存标记：
+         依赖变化 → 只把 dirty 置 true 并通知下游；被读取且 dirty 才重算。
+
+数组呢？ push/pop 会读写 length：执行期间暂停收集（防自我触发）；
+         includes 找不到时用原始值兜底再找一次（代理对象 ≠ 原始对象）。</pre>
+    </div>
+
+    <div class="card">
+      <h2>源码对照</h2>
+      <table class="tokens">
+        <thead><tr><th>概念</th><th>文件</th><th>关键函数</th></tr></thead>
+        <tbody>
+          <tr><td>账本（targetMap）</td><td class="v">src/reactivity/dep.js</td><td class="v">track / trigger</td></tr>
+          <tr><td>副作用与依赖清理</td><td class="v">src/reactivity/effect.js</td><td class="v">ReactiveEffect.run（先 cleanup 再收集）</td></tr>
+          <tr><td>Proxy 拦截</td><td class="v">src/reactivity/reactive.js</td><td class="v">get/set/has/deleteProperty/ownKeys</td></tr>
+          <tr><td>ref</td><td class="v">src/reactivity/ref.js</td><td class="v">RefImpl 的 value 存取器 + proxyRefs</td></tr>
+          <tr><td>computed</td><td class="v">src/reactivity/computed.js</td><td class="v">dirty + scheduler</td></tr>
+          <tr><td>批量更新 / nextTick</td><td class="v">src/reactivity/scheduler.js</td><td class="v">queueJob / flushJobs</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script type="module">
+    import { reactive, ref, computed, effect, debugDeps } from '../src/index.js'
+    import { ReactiveEffect } from '../src/reactivity/effect.js'
+
+    const $log = document.getElementById('dep-log')
+    const log = (msg, cls = 'op-info') => {
+      const div = document.createElement('div')
+      div.className = cls
+      div.textContent = msg
+      $log.appendChild(div)
+      $log.scrollTop = $log.scrollHeight
+    }
+
+    // ================= 实验一：批量更新 =================
+    const batchState = reactive({ count: 0 })
+    let renderCount = 0
+    const $val = document.getElementById('batch-val')
+    const $render = document.getElementById('batch-render')
+
+    // 模拟一个组件渲染 effect：带调度器 → 排队批量执行
+    const renderJob = () => {
+      renderCount++
+      $val.textContent = batchState.count
+      $render.textContent = renderCount
+      log(`[渲染] 第 ${renderCount} 次，读到 count = ${batchState.count}　· 账本: ${JSON.stringify(debugDeps(batchState))}`, 'op-update')
+    }
+    const queue = new Set()
+    let pending = false
+    const renderEffect = new ReactiveEffect(renderJob, effectInstance => {
+      // ★ 这就是组件渲染 effect 的 scheduler：数据变化时不立刻重跑，先入队
+      queue.add(effectInstance)
+      if (!pending) {
+        pending = true
+        Promise.resolve().then(() => {
+          pending = false
+          const jobs = [...queue]; queue.clear()
+          log(`[调度器] 微任务执行，队列里有 ${jobs.length} 个任务（去重 + 合并）`, 'op-new')
+          jobs.forEach(e => e.run())
+        })
+      }
+    })
+    renderEffect.run()
+
+    document.getElementById('btn-batch').addEventListener('click', () => {
+      log(`[写入] count++ → trigger 通知渲染 effect 的调度器（入队，暂不执行）`, 'op-remove')
+      batchState.count++
+    })
+    document.getElementById('btn-batch3').addEventListener('click', () => {
+      log(`[写入] count += 3 → 三次 trigger，三次入队，但 Set 去重后只剩 1 个任务`, 'op-remove')
+      batchState.count++; batchState.count++; batchState.count++
+    })
+
+    // ================= 实验二：computed =================
+    const nums = reactive({ raw: [1, 2, 3, 4] })
+    let getterRuns = 0
+    const sum = computed(() => {
+      getterRuns++
+      document.getElementById('sum-count').textContent = getterRuns
+      log(`[computed] getter 执行了！第 ${getterRuns} 次（被读取且 dirty 才会进来）`, 'op-new')
+      return nums.raw.reduce((a, b) => a + b, 0)
+    })
+    const $sum = document.getElementById('sum-val')
+    effect(() => { $sum.textContent = sum.value }) // 展示层读取
+
+    document.getElementById('nums').addEventListener('input', e => {
+      const parsed = e.target.value.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+      nums.raw = parsed
+      log(`[写入] raw 更新 → computed 的调度器：置 dirty = true，并通知渲染 effect（getter 此刻并没有执行！）`, 'op-move')
+    })
+    document.getElementById('btn-read').addEventListener('click', () => {
+      $sum.textContent = sum.value // 读取时才真正重算
+      log(`[读取] sum.value → dirty 为 true → 执行 getter 重算`, 'op-update')
+    })
+  </script>
+</body>
+</html>

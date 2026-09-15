@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>vue-mini —— 最小可用 Vue 3（学习项目）</title>
+  <link rel="stylesheet" href="./shared.css">
+</head>
+<body>
+  <header class="site">
+    <a class="logo" href="./index.html">vue-mini</a>
+    <nav>
+      <a href="./index.html" class="active">总览</a>
+      <a href="./compile-pipeline.html">① 模板是怎么被编译的</a>
+      <a href="./renderer.html">② 渲染器与 Diff</a>
+      <a href="./reactivity.html">③ 响应式系统</a>
+      <a href="./components.html">④ 组件化原理</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <h1>vue-mini：跟着《Vue.js 设计与实现》手写一个最小可用 Vue 3</h1>
+    <p class="lead">
+      零依赖、纯 ESM。这个项目回答一个核心问题：<b>模板字符串是如何一步步变成真实 DOM，
+      并且在数据变化时只更新必要部分的？</b> 下面的四个演示页面对应它的四大模块，边玩边对照源码和
+      <code class="inline">docs/</code> 里的长文讲解。
+    </p>
+
+    <div class="card">
+      <h2>四条主线，一条闭环</h2>
+      <pre class="code">
+用户写模板
+   │  <span class="str">"&lt;button @click="count++"&gt;{{ count }}&lt;/button&gt;"</span>
+   ▼
+<span class="flag">① 编译器 compiler-core</span>     tokenize → parse → transform → generate
+   │  产出 render 函数（含 patchFlag、静态提升、Block Tree 等优化）
+   ▼
+<span class="flag">② 渲染器 runtime-core</span>      render 函数执行 → VNode 树 → patch(old, new) → 最小化 DOM 操作
+   │            ▲
+   │            │  数据变化时重新执行 render，只 diff 差异
+   ▼            │
+<span class="flag">③ 响应式 reactivity</span>        Proxy 拦截读写 → track 收集依赖 → trigger 通知 effect → 调度器批量更新
+   │
+   ▼
+<span class="flag">④ 组件系统 runtime-core</span>    setup / props / emit / slots / 生命周期
+      组件也是一个 vnode（type 是对象），渲染流程与元素共用同一套 diff</pre>
+    </div>
+
+    <div class="card">
+      <h2>怎么运行</h2>
+      <pre class="code"><span class="kw">cd</span> vue/vue3
+node server.mjs        <span class="ctx"># 打开 http://localhost:5173/</span>
+npm test               <span class="ctx"># 114 个单元测试（跑在自制的 mini-dom 上，无需浏览器）</span></pre>
+    </div>
+
+    <div class="card">
+      <h2>目录导读</h2>
+      <pre class="code">vue/vue3
+├── src/
+│   ├── shared/            位标记（ShapeFlags/PatchFlags）、工具函数、class/style 归一化
+│   ├── reactivity/        effect、reactive、ref、computed、调度器（批量更新队列）
+│   ├── runtime-core/      vnode、渲染器（mount/patch/双端diff）、组件系统、h、生命周期
+│   ├── runtime-dom/       nodeOps（真实 DOM 操作）、patchProp（属性/事件/样式）、createApp
+│   ├── compiler-core/     tokenize（状态机）→ parse（栈）→ transform（优化）→ codegen
+│   └── index.js           对外出口：把编译器注入运行时（"完整版"的关键）
+├── examples/              四个可视化演示页面（就是本站的四个 tab）
+├── docs/                  每个模块一篇长文讲解（强烈建议对照阅读）
+└── tests/                 mini-dom + node --test，覆盖编译器/渲染器/响应式/组件全链路</pre>
+    </div>
+
+    <div class="card">
+      <h2>建议的学习顺序</h2>
+      <p>
+        ① 先打开「响应式系统」理解数据怎么驱动函数；
+        ② 再看「编译流水线」理解模板怎么变成 render 函数；
+        ③ 然后是「渲染器与 Diff」理解 vnode 怎么变成 DOM 并最小化更新；
+        ④ 最后「组件化原理」把三者串成闭环 —— 你会发现组件没有任何魔法，
+        它只是"type 为对象的 vnode"。
+      </p>
+    </div>
+  </main>
+</body>
+</html>

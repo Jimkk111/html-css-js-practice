@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>② 渲染器与 Diff —— 看见每一次 DOM 操作</title>
+  <link rel="stylesheet" href="./shared.css">
+  <style>
+    .stage ul { list-style: none; padding: 0; margin: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+    .stage li.item {
+      padding: 8px 14px; border-radius: 6px; color: #fff; font-weight: 600;
+      font-size: 14px; user-select: none;
+    }
+    .ops { min-height: 60px; }
+  </style>
+</head>
+<body>
+  <header class="site">
+    <a class="logo" href="./index.html">vue-mini</a>
+    <nav>
+      <a href="./index.html">总览</a>
+      <a href="./compile-pipeline.html">① 编译流水线</a>
+      <a href="./renderer.html" class="active">② 渲染器与 Diff</a>
+      <a href="./reactivity.html">③ 响应式系统</a>
+      <a href="./components.html">④ 组件化原理</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <h1>渲染器：VNode 树 → 真实 DOM，且只做「必要」的 DOM 操作</h1>
+    <p class="lead">
+      下面的列表由渲染器驱动。点击按钮改变数据，<b>右侧日志是渲染器真实的操作记录</b>
+      （由包装 nodeOps 获得，不是模拟）。重点观察：带 key 的列表在乱序时<b>不重建 DOM，只移动</b>；
+      文本更新只走 <code class="inline">setText</code>，连元素都不碰。
+    </p>
+
+    <div class="card stage">
+      <h2>列表操作 —— 观察 keyed diff 的移动/复用</h2>
+      <div class="demo-stage">
+        <ul id="list"></ul>
+      </div>
+      <p style="margin: 14px 0 8px;">
+        <button id="btn-append">尾部追加</button>
+        <button id="btn-prepend">头部插入</button>
+        <button id="btn-shuffle">随机乱序</button>
+        <button id="btn-remove">随机删除一项</button>
+        <button id="btn-reverse">整体反转</button>
+        <button id="btn-rename">全部改名（只更新文本）</button>
+      </p>
+      <p class="muted">对照实验：每个元素身上写了自己的 DOM uid（右下角小字）。乱序后 uid 不变 = DOM 被复用，只有位置变了。</p>
+    </div>
+
+    <div class="card">
+      <h2>渲染器的 DOM 操作日志</h2>
+      <div class="log ops" id="ops"><div class="op-info">（点击上面的按钮，这里会显示 patch 执行的每一笔 DOM 操作）</div></div>
+      <p class="muted">
+        颜色含义：<span class="op-new">绿=创建/插入</span>、
+        <span class="op-move">黄=移动</span>、
+        <span class="op-update">蓝=更新文本/属性</span>、
+        <span class="op-remove">红=移除</span>。
+        注意「随机乱序」几乎全是黄色（移动），「全部改名」只有蓝色（更新文本）——
+        这就是虚拟 DOM diff 的意义：把"重建"降级成"挪动与修补"。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>这条链路里发生了什么</h2>
+      <pre class="code">
+数据变化（比如 list 被替换）
+   ↓  <span class="ctx">响应式系统 trigger</span>
+组件的渲染 effect 重新执行 render 函数 → 得到<b>新</b> VNode 树
+   ↓
+patch(oldVNode, newVNode)          ← 上一次的 VNode 存在 container._vnode 上
+   ├─ 类型/key 相同 → 复用 DOM（el 指针直接继承）
+   │    ├─ patchProps：只改变化的属性（编译产物还带 dynamicProps 清单，跳过静态属性）
+   │    └─ patchChildren → patchKeyedChildren
+   │         ① 头-头 扫描（能复用就跳过）  ② 尾-尾 扫描
+   │         ③ 新的有剩 → 挂载新增          ④ 旧的有剩 → 卸载多余
+   │         ⑤ 中间乱序区 → 按 key 建 Map，判断是否需要移动，从后往前插入
+   └─ 不同 → 卸载旧的，挂载新的（唯一会"重建"的情况）</pre>
+    </div>
+  </main>
+
+  <script type="module">
+    import { createRenderer } from '../src/runtime-core/renderer.js'
+    import { nodeOps } from '../src/runtime-dom/nodeOps.js'
+    import { patchProp } from '../src/runtime-dom/patchProp.js'
+    import { h, reactive } from '../src/index.js'
+    import { nextTick } from '../src/reactivity/scheduler.js'
+
+    // ---------- 带日志的 nodeOps：截获渲染器的每一笔 DOM 操作 ----------
+    const $ops = document.getElementById('ops')
+    let logging = false
+    const log = (cls, text) => {
+      if (!logging) return
+      const div = document.createElement('div')
+      div.className = cls
+      div.textContent = text
+      $ops.appendChild(div)
+      $ops.scrollTop = $ops.scrollHeight
+    }
+    let uid = 0
+
+    const loggingNodeOps = {
+      createElement(tag) { log('op-new', `createElement <${tag}>`); return nodeOps.createElement(tag) },
+      createText(t) { log('op-new', `createText ${JSON.stringify(t)}`); return nodeOps.createText(t) },
+      createComment(t) { log('op-new', `createComment`); return nodeOps.createComment(t) },
+      setText(n, t) { log('op-update', `setText ${JSON.stringify(String(n.nodeValue))} → ${JSON.stringify(t)}`); nodeOps.setText(n, t) },
+      setElementText(el, t) { log('op-update', `setElementText <${el.localName}> → ${JSON.stringify(t)}`); nodeOps.setElementText(el, t) },
+      insert(child, parent, anchor) {
+        const moved = child.parentNode != null
+        log(moved ? 'op-move' : 'op-new', `${moved ? 'move' : 'insert'} <${child.localName || '#text'} uid=${child._uid ?? '?'}> → <${parent.localName}>`)
+        nodeOps.insert(child, parent, anchor)
+      },
+      remove(child) { log('op-remove', `remove <${child.localName || '#text'}> uid=${child._uid ?? '?'}`); nodeOps.remove(child) },
+      parentNode: n => nodeOps.parentNode(n),
+      nextSibling: n => nodeOps.nextSibling(n),
+      patchProp(el, key, prev, next) {
+        // style 的值每次渲染都是新对象（内容相同引用不同），渲染器会照常调 patchProp，
+        // 但日志里"内容没变的 style"属于噪音 —— 序列化一致就跳过不记。
+        const changed = key === 'style'
+          ? JSON.stringify(prev ?? null) !== JSON.stringify(next ?? null)
+          : prev !== next
+        if (logging && key !== 'data-uid' && changed) {
+          log('op-update', `patchProp <${el.localName}> ${key}: ${JSON.stringify(prev ?? null)} → ${JSON.stringify(next ?? null)}`)
+        }
+        patchProp(el, key, prev, next)
+      },
+    }
+
+    const renderer = createRenderer({ ...loggingNodeOps })
+    const listEl = document.getElementById('list')
+
+    // ---------- 数据 ----------
+    const state = reactive({ list: [
+      { id: 1, name: '苹果', color: '#e67e22' },
+      { id: 2, name: '香蕉', color: '#c9a227' },
+      { id: 3, name: '葡萄', color: '#8e44ad' },
+    ] })
+    let nextId = 4
+    const palette = ['#16a085', '#2980b9', '#c0392b', '#d35400', '#27ae60', '#7c5cd6']
+
+    // ---------- 渲染 ----------
+    let first = true
+    function renderListApp() {
+      const vnode = h('ul', null, state.list.map(item =>
+        h('li', { key: item.id, class: 'item', style: { background: item.color }, 'data-uid': '' }, [
+          `${item.name} `,
+          h('span', { style: { fontSize: '10px', opacity: .75, fontWeight: 400 } }, `#dom${item.elUid ?? ''}`),
+        ])
+      ))
+      logging = true
+      $ops.innerHTML = ''
+      const div = document.createElement('div'); div.className = 'op-info'; div.textContent = '—— 开始 patch ——'; $ops.appendChild(div)
+      renderer.render(vnode, listEl)
+      logging = false
+      // 把每个 DOM 的 uid 回显到界面上
+      ;[...listEl.querySelectorAll('li')].forEach((li, i) => {
+        const item = state.list[i]
+        if (item.elUid == null) item.elUid = ++uid
+        li.querySelector('span').textContent = '#dom' + item.elUid
+      })
+      first = false
+    }
+
+    renderListApp()
+
+    // ---------- 交互 ----------
+    // 注意：这个页面演示的是"渲染器"本身，所以按钮在改完数据后手动调 renderListApp()。
+    // （真实 Vue 里这一步由组件的渲染 effect 自动完成 —— 见 components.html 和 reactivity.html）
+    const action = fn => () => {
+      fn()
+      renderListApp()
+    }
+    const rerender = () => renderListApp()
+
+    document.getElementById('btn-append').addEventListener('click', action(() => {
+      state.list.push({ id: nextId, name: '新水果' + nextId, color: palette[nextId % palette.length] })
+      nextId++
+    }))
+    document.getElementById('btn-prepend').addEventListener('click', action(() => {
+      state.list.unshift({ id: nextId, name: '新水果' + nextId, color: palette[nextId % palette.length] })
+      nextId++
+    }))
+    document.getElementById('btn-shuffle').addEventListener('click', action(() => {
+      state.list = [...state.list].sort(() => Math.random() - 0.5)
+    }))
+    document.getElementById('btn-remove').addEventListener('click', action(() => {
+      if (state.list.length <= 1) return
+      const i = Math.floor(Math.random() * state.list.length)
+      state.list.splice(i, 1)
+    }))
+    document.getElementById('btn-reverse').addEventListener('click', action(() => {
+      state.list = [...state.list].reverse()
+    }))
+    document.getElementById('btn-rename').addEventListener('click', action(() => {
+      state.list.forEach((item, i) => { item.name = item.name.split('-')[0] + '-' + 'ABCDE'[i % 5] })
+    }))
+  </script>
+</body>
+</html>

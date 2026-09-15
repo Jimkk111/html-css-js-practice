@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>④ 组件化原理 —— 组件只是「type 为对象的 vnode」</title>
+  <link rel="stylesheet" href="./shared.css">
+  <style>
+    .todo { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px dashed var(--line); }
+    .todo.done span.text { text-decoration: line-through; color: var(--muted); }
+    .todo button { margin-left:auto; padding: 2px 10px; }
+    .todo input[type=checkbox] { width: 16px; height: 16px; }
+  </style>
+</head>
+<body>
+  <header class="site">
+    <a class="logo" href="./index.html">vue-mini</a>
+    <nav>
+      <a href="./index.html">总览</a>
+      <a href="./compile-pipeline.html">① 编译流水线</a>
+      <a href="./renderer.html">② 渲染器与 Diff</a>
+      <a href="./reactivity.html">③ 响应式系统</a>
+      <a href="./components.html" class="active">④ 组件化原理</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <h1>组件化原理：没有任何魔法</h1>
+    <p class="lead">
+      下面是一个完全跑在 vue-mini 上的待办事项应用。它用到组件化的所有核心机制：
+      <b>props 下行、emit 上行、插槽分发、生命周期</b>。
+      所有机制都归结为一句话：<b>组件也是 vnode，只不过 type 是对象；渲染器分派到独立的组件流程，流程内部又回到"执行 render → 得到子树 vnode → patch"。</b>
+    </p>
+
+    <div class="cols two">
+      <div class="card">
+        <h2>应用（跑在你正在看的浏览器里）</h2>
+        <div class="demo-stage" id="app"></div>
+      </div>
+      <div class="card">
+        <h2>组件生命周期日志</h2>
+        <div class="log" id="lc-log" style="max-height:420px;"></div>
+        <p class="muted">试着勾选/删除/新增条目，观察每个组件的挂载与卸载；点「重置列表」看整批卸载的顺序。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>这个应用里的组件通信路线</h2>
+      <pre class="code">
+<span class="flag">App</span>  持有 todos: reactive([]) 和 todosLeft: computed
+ │  模板: &lt;TodoInput @add="addTodo" /&gt; / &lt;TodoItem v-for @toggle @remove /&gt;
+ │  <span class="ctx">props 下行 ↓</span>            <span class="ctx">emit 上行 ↑</span>
+ ├─ <span class="flag">&lt;TodoInput :placeholder="..." @add="addTodo"&gt;</span>
+ │     内部维护草稿 ref，回车时 emit('add', 文本)
+ ├─ <span class="flag">&lt;TodoItem v-for="todo in todos" :todo="todo"&gt;</span>
+ │     接收 todo prop（浅响应式），勾选/删除时 emit('toggle'/'remove', todo)
+ │     勾选框旁的 &lt;slot name="tag"&gt; 展示 App 分发的插槽内容（作用域插槽传回 todo）
+ └─ <span class="flag">&lt;AppFooter :count="todosLeft"&gt;</span>
+       props 没变时父组件重渲染会跳过它（shouldUpdateComponent）
+
+底层只发生了三件事：
+  ① 父 render 执行 → 创建子组件 vnode（type 是对象 → 渲染器走 processComponent）
+  ② mountComponent：创建实例 → initProps → 执行 setup → 渲染 effect → patch 子树
+  ③ 子 emit('add', v)：在 vnode.props 里找 onAdd 并调用 → 父的回调改父的状态 → 父重渲染 → 新 props 流向子</pre>
+    </div>
+
+    <div class="card">
+      <h2>源码对照</h2>
+      <table class="tokens">
+        <thead><tr><th>机制</th><th>文件</th><th>发生了什么</th></tr></thead>
+        <tbody>
+          <tr><td>组件 vnode 分派</td><td class="v">renderer.js → processComponent</td><td class="v">type 是对象就走组件流程</td></tr>
+          <tr><td>实例与代理</td><td class="v">component.js → createComponentInstance</td><td class="v">模板里 _ctx 的查找顺序：setupState → props → data</td></tr>
+          <tr><td>props/attrs 拆分</td><td class="v">component.js → initProps</td><td class="v">声明过的进 props（浅响应式），没声明的进 attrs 并透传根元素</td></tr>
+          <tr><td>emit</td><td class="v">component.js → emit</td><td class="v">'add' → 找 props.onAdd —— 事件就是特殊名字的 prop</td></tr>
+          <tr><td>插槽</td><td class="v">h.js → withCtx / renderSlot</td><td class="v">插槽是"返回 vnode 的函数"，在父组件作用域里执行</td></tr>
+          <tr><td>渲染 effect</td><td class="v">component.js → setupRenderEffect</td><td class="v">渲染函数包成 effect + 调度器；子树的 el 冒泡给组件 vnode</td></tr>
+          <tr><td>生命周期</td><td class="v">lifecycle.js + component.js</td><td class="v">钩子注册到当前实例的数组，实例流转到对应阶段时按序调用</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script type="module">
+    import { createApp, ref, reactive, computed, defineComponent, onMounted, onUnmounted, onUpdated } from '../src/index.js'
+
+    // ---------------- 生命周期日志 ----------------
+    const $log = document.getElementById('lc-log')
+    const log = msg => {
+      const div = document.createElement('div')
+      div.textContent = msg
+      $log.appendChild(div)
+      $log.scrollTop = $log.scrollHeight
+    }
+    let seq = 0
+
+    // ---------------- 子组件：输入框 ----------------
+    const TodoInput = defineComponent({
+      name: 'TodoInput',
+      props: { placeholder: String },
+      emits: ['add'],
+      template: `
+        <div style="display:flex; gap:8px;">
+          <input type="text" :placeholder="placeholder" v-model="draft"
+                 @keydown.enter="submit" style="flex:1;">
+          <button @click="submit">添加</button>
+        </div>`,
+      setup(props, { emit }) {
+        const draft = ref('')
+        const submit = () => {
+          const text = draft.value.trim()
+          if (!text) return
+          emit('add', text)
+          draft.value = ''
+        }
+        onMounted(() => log(`${++seq}. [TodoInput] onMounted —— 实例创建、DOM 已插入`))
+        return { draft, submit }
+      },
+    })
+
+    // ---------------- 子组件：单条待办 ----------------
+    const TodoItem = defineComponent({
+      name: 'TodoItem',
+      props: { todo: { type: Object } },
+      emits: ['toggle', 'remove'],
+      template: `
+        <div class="todo" :class="{ done: todo.done }">
+          <input type="checkbox" :checked="todo.done" @change="$emit('toggle', todo)">
+          <span class="text">{{ todo.text }}</span>
+          <slot name="tag" :todo="todo"></slot>
+          <button @click="$emit('remove', todo)" style="background:#c0392b;border-color:#c0392b;">删</button>
+        </div>`,
+      setup(props) {
+        onMounted(() => log(`${++seq}. [TodoItem] onMounted —— "${props.todo.text}"`))
+        onUpdated(() => log(`${++seq}. [TodoItem] onUpdated —— "${props.todo.text}" 重新渲染`))
+        onUnmounted(() => log(`${++seq}. [TodoItem] onUnmounted —— "${props.todo.text}" 已卸载，effect 已停止`))
+        return {}
+      },
+    })
+
+    // ---------------- 子组件：底部统计 ----------------
+    const AppFooter = defineComponent({
+      name: 'AppFooter',
+      props: { count: Number },
+      template: '<p class="muted" style="margin-bottom:0;">剩余未完成：<b>{{ count }}</b> 项</p>',
+      setup() {
+        onUpdated(() => log(`${++seq}. [AppFooter] onUpdated`))
+        return {}
+      },
+    })
+
+    // ---------------- 根组件 ----------------
+    const App = defineComponent({
+      name: 'App',
+      components: { TodoInput, TodoItem, AppFooter },
+      template: `
+        <h2 style="margin-top:0;">待办清单</h2>
+        <TodoInput placeholder="输入待办，回车添加" @add="addTodo" />
+        <div style="margin:10px 0;">
+          <TodoItem v-for="todo in todos" :key="todo.id" :todo="todo"
+                    @toggle="t => t.done = !t.done" @remove="removeTodo">
+            <template #tag>
+              <span class="badge">插槽</span>
+            </template>
+          </TodoItem>
+        </div>
+        <AppFooter :count="todosLeft" />`,
+      setup() {
+        let id = 0
+        const todos = reactive([
+          { id: ++id, text: '读懂 tokenize 的状态机', done: true },
+          { id: ++id, text: '看懂 patchKeyedChildren', done: false },
+          { id: ++id, text: '手写一遍 mini ref', done: false },
+        ])
+        // computed：由 todos 派生，自动保持最新
+        const todosLeft = computed(() => todos.filter(t => !t.done).length)
+
+        const addTodo = text => {
+          log(`${++seq}. [App] 收到子组件 emit('add', "${text}") → 修改自己的状态`)
+          todos.push({ id: ++id, text, done: false })
+        }
+        const removeTodo = todo => todos.splice(todos.indexOf(todo), 1)
+
+        onMounted(() => log(`${++seq}. [App] onMounted —— 整棵组件树挂载完成（注意子组件先于父组件）`))
+        return { todos, todosLeft, addTodo, removeTodo }
+      },
+    })
+
+    // ---------------- 启动 ----------------
+    createApp(App).mount('#app')
+  </script>
+</body>
+</html>
