@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        button{
+            display: inline-block;
+            width: 50px;
+            height: 20px;
+        }
+        .myTable {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            overflow: hidden;
+            font-size: 14px;
+        }
+
+        .myTable th,
+        .myTable td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .myTable thead th {
+            background: #f9fafb;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .myTable tbody tr:nth-child(even) {
+            background: #fcfcfd;
+        }
+
+        .myTable tbody tr:hover {
+            background: #eff6ff;
+        }
+
+        .myTable tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .myTable td.num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+    </style>
+</head>
+<body>
+    <form action="" class="myForm">
+        <input type="text" name="id">
+        <input type="text" name="address">
+        <input type="text" name="phone">
+        <input type="text" name="ipAddress">
+        <input type="number" name="age">
+        <button></button>
+    </form>
+    <table class="myTable">
+        <thead>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <script>
+        const tableData = localStorage.getItem("tableData")
+        const theadEnum = {
+            ID:"id",
+            ADDRESS:"地址",
+            PHONE:"电话",
+            IP_ADDRESS:"ip地址",
+            AGE:"年龄"
+        }
+        const myFormDom = document.getElementsByClassName("myForm")[0]
+        const formButtonDom = document.querySelector("form button")
+        const myTableDom = document.querySelector(".myTable")
+        console.log(myTableDom)
+        const tableHeadDom = myTableDom.children[0]
+        const tableBodyDom = myTableDom.children[1]
+
+        formButtonDom.addEventListener("click",(event) => {
+            event.preventDefault()
+            const formData = new FormData(myFormDom)
+            const newValue = {}
+            for(const [key,value] of formData.entries()){
+                newValue[key] = value
+            }
+            addData(newValue)
+            tableData.push(newValue)
+            localStorage.setItem("tableData")
+            console.log(tableData)
+        })
+
+        const initTableData = function(){
+            const headTrDom = document.createElement("tr")
+            tableHeadDom.appendChild(headTrDom)
+            for( key in theadEnum ){
+                const td = document.createElement("td")
+                td.innerText = theadEnum[key]
+                headTrDom.appendChild(td)
+            }
+            for(trData of tableData){
+                const bodyTrDom = document.createElement("tr")
+                tableBodyDom.appendChild(bodyTrDom)
+                for(key in trData){
+                    const td = document.createElement("td")
+                    td.innerText = trData[key]
+                    bodyTrDom.appendChild(td)
+                }
+            }
+        }
+
+        const addData = function(newTrData){
+            const bodyTrDom = document.createElement("tr")
+            tableBodyDom.appendChild(bodyTrDom)
+            for(key in newTrData){
+                const td = document.createElement("td")
+                td.innerText = newTrData[key]
+                bodyTrDom.appendChild(td)
+            }
+        }
+
+        initTableData()
+        
+    </script>
+</body>
+</html>
